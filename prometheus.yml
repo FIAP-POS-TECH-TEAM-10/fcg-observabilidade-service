@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'fcg-users-api'
+    static_configs:
+      - targets: ['fcg-users-api:5001']
+
+  - job_name: 'fcg-catalog-api'
+    static_configs:
+      - targets: ['fcg-catalog-api:5002']

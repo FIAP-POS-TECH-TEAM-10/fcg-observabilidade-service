@@ -1,0 +1,46 @@
+version: '3.8'
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "fcg-users-api:host-gateway"
+      - "fcg-catalog-api:host-gateway"
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    depends_on:
+      - prometheus
+
+  zabbix-server:
+    image: zabbix/zabbix-server-pgsql:latest
+    environment:
+      - DB_SERVER_HOST=zabbix-db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+    depends_on:
+      - zabbix-db
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-pgsql:latest
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_SERVER_HOST=zabbix-db
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
+    depends_on:
+      - zabbix-server
+
+  zabbix-db:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=zabbix
+      - POSTGRES_PASSWORD=zabbix
