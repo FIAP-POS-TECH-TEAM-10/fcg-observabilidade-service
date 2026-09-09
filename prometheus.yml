@@ -9,3 +9,11 @@ scrape_configs:
   - job_name: 'fcg-catalog-api'
     static_configs:
       - targets: ['fcg-catalog-api:5002']
+
+  - job_name: 'fcg-payments-api'
+    static_configs:
+      - targets: ['fcg-payments-api:5003']
+
+  - job_name: 'fcg-notifications-worker'
+    static_configs:
+      - targets: ['fcg-notifications-worker:5004']
