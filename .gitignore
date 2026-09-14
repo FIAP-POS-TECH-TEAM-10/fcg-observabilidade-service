@@ -1,0 +1,7 @@
+# Ignorar pastas ocultas do Terraform
+.terraform/
+
+# Ignorar arquivos de estado local (caso use algum)
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
