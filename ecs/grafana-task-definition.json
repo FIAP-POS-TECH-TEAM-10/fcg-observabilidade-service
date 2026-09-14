@@ -1,0 +1,67 @@
+{
+  "family": "fcg-grafana",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "grafana",
+      "image": "<ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/fcg-grafana:1.0.0",
+      "essential": true,
+      "portMappings": [
+        {
+          "name": "grafana",
+          "containerPort": 3000,
+          "hostPort": 3000,
+          "protocol": "tcp",
+          "appProtocol": "http"
+        }
+      ],
+      "environment": [
+        {
+          "name": "GF_SECURITY_ADMIN_USER",
+          "value": "admin"
+        },
+        {
+          "name": "GF_AUTH_ANONYMOUS_ENABLED",
+          "value": "false"
+        },
+        {
+          "name": "GF_AUTH_DISABLE_LOGIN_FORM",
+          "value": "false"
+        },
+        {
+          "name": "GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH",
+          "value": "/var/lib/grafana/dashboards/fcgames-observability.json"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "GF_SECURITY_ADMIN_PASSWORD",
+          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<ACCOUNT_ID>:secret:<GRAFANA_SECRET_NAME>"
+        }
+      ],
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://127.0.0.1:3000/api/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 30
+      },
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/fcg-grafana",
+          "awslogs-region": "<AWS_REGION>",
+          "awslogs-stream-prefix": "ecs",
+          "awslogs-create-group": "true"
+        }
+      }
+    }
+  ]
+}

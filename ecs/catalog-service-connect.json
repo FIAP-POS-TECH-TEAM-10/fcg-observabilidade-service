@@ -1,0 +1,18 @@
+{
+  "serviceConnectConfiguration": {
+    "enabled": true,
+    "namespace": "fcgames.local",
+    "services": [
+      {
+        "portName": "http",
+        "discoveryName": "fcg-catalog-service",
+        "clientAliases": [
+          {
+            "port": 5002,
+            "dnsName": "fcg-catalog-service"
+          }
+        ]
+      }
+    ]
+  }
+}

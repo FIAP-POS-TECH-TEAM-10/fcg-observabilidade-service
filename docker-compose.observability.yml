@@ -1,54 +1,25 @@
-version: '3.8'
 services:
   prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    build:
+      context: ./prometheus
+    image: fcg-prometheus:1.0.0
     ports:
       - "9090:9090"
-    extra_hosts:
-      - "fcg-users-api:host-gateway"
-      - "fcg-catalog-api:host-gateway"
+    restart: unless-stopped
+
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: ./grafana
+    image: fcg-grafana:1.0.0
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
-      - GF_AUTH_DISABLE_LOGIN_FORM=true
-      - GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/var/lib/grafana/dashboards/fcgames-observability.json
-    volumes:
-      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
-      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
-      - ./grafana/dashboards:/var/lib/grafana/dashboards
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/fcgames-observability.json
     depends_on:
       - prometheus
 
-  zabbix-server:
-    image: zabbix/zabbix-server-pgsql:latest
-    environment:
-      - DB_SERVER_HOST=zabbix-db
-      - POSTGRES_USER=zabbix
-      - POSTGRES_PASSWORD=zabbix
-    depends_on:
-      - zabbix-db
-
-  zabbix-web:
-    image: zabbix/zabbix-web-nginx-pgsql:latest
-    ports:
-      - "8080:8080"
-    environment:
-      - DB_SERVER_HOST=zabbix-db
-      - POSTGRES_USER=zabbix
-      - POSTGRES_PASSWORD=zabbix
-    depends_on:
-      - zabbix-server
-
-  zabbix-db:
-    image: postgres:13
-    environment:
-      - POSTGRES_USER=zabbix
-      - POSTGRES_PASSWORD=zabbix
