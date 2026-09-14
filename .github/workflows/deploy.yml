@@ -1,0 +1,60 @@
+name: "Deploy Stack de Monitoramento"
+
+on:
+  push:
+    branches:
+      - develop
+
+# Permissões necessárias para autenticação via OIDC
+permissions:
+  id-token: write # Requerido para solicitar o token OIDC
+  contents: read  # Requerido para fazer checkout do código
+
+jobs:
+  terraform-and-deploy:
+    name: "Provisionar e Fazer Deploy"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }} # Ex: arn:aws:iam::123456789012:role/GitHubActionsRole
+          aws-region: "us-east-1"
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init & Apply
+        id: tf
+        run: |
+          cd terraform
+          terraform init
+          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
+
+      - name: Aguardar Inicialização do Docker na EC2
+        run: sleep 30
+
+      - name: Enviar docker-compose.yml via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.yml"
+          target: "/home/ubuntu/"
+
+      - name: Executar Docker Compose na EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.EC2_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /home/ubuntu
+            docker compose pull
+            docker compose up -d
