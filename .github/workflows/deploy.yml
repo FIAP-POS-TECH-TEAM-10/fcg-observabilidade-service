@@ -14,6 +14,10 @@ permissions:
   contents: read  # Requerido para fazer checkout do código
   pull-requests: write # Permite adicionar o resultado do plan como comentário no PR (opcional)
 
+env:
+  AWS_REGION: sa-east-1
+  ROLE_TO_ASSUME: arn:aws:iam::915153720516:role/GitHubActions-Observabilidade-Deploy-Role
+
 jobs:
   terraform-plan:
     name: "Terraform Plan (Validação)"
@@ -28,8 +32,8 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
@@ -69,8 +73,8 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
