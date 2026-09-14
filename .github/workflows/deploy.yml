@@ -1,4 +1,4 @@
-name: "Deploy Stack de Monitoramento"
+name: "Plan e Deploy Stack de Monitoramento"
 
 on:
   push:
