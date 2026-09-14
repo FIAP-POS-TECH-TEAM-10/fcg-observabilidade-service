@@ -1,0 +1,102 @@
+name: "Deploy Stack de Monitoramento"
+
+on:
+  push:
+    branches:
+      - develop
+  pull_request:
+    branches:
+      - develop
+
+# Permissões necessárias para autenticação via OIDC
+permissions:
+  id-token: write # Requerido para solicitar o token OIDC
+  contents: read  # Requerido para fazer checkout do código
+  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR (opcional)
+
+jobs:
+  terraform-plan:
+    name: "Terraform Plan (Validação)"
+    runs-on: ubuntu-latest
+    outputs:
+      ec2_id: ${{ steps.tf-outputs.outputs.ec2_id }}
+
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: "sa-east-1"
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Format Check
+        run: |
+          cd terraform
+          terraform fmt -check
+
+      - name: Terraform Validate
+        run: |
+          cd terraform
+          terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          cd terraform
+          terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+
+  terraform-apply-and-deploy:
+    name: "Terraform Apply & Deploy Stack"
+    needs: terraform-plan
+    # Roda o Apply APENAS quando houver PUSH na branch main (não roda em Pull Requests)
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Credenciais AWS via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: "sa-east-1"
+
+      - name: Configurar Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        run: |
+          cd terraform
+          terraform init
+
+      - name: Terraform Apply
+        id: apply
+        run: |
+          cd terraform
+          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+
+      - name: Aguardar Inicialização do Docker na EC2
+        run: sleep 30
+
+      # Exemplo de comando via AWS SSM Run Command (sem precisar de IP Público)
+      - name: Deploy Docker Compose via AWS SSM
+        run: |
+          echo "Enviando arquivo docker-compose.yml e executando o deploy via SSM..."
+          
+          # 1. Copiar o docker-compose.yml para a EC2 usando SSM S3 / RunCommand
+          aws ssm send-command \
+            --instance-ids "${{ env.EC2_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands=["cat << 'EOF' > /home/ubuntu/docker-compose.yml", "$(cat docker-compose.yml)", "EOF", "chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml", "cd /home/ubuntu && docker compose pull && docker compose up -d"]
