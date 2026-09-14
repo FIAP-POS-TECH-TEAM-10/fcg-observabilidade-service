@@ -3,7 +3,7 @@ name: "Deploy Stack de Monitoramento"
 on:
   push:
     branches:
-      - main
+      - develop
 
 # Permissões necessárias para autenticação via OIDC
 permissions:
