@@ -1,0 +1,100 @@
+# Stack publicada na EC2 pelo GitHub Actions (via SSM Run Command).
+#
+# São 5 containers em 1 GB de RAM (t2.micro). Só cabe por causa do swap de 2 GB
+# configurado no user_data em infra/main.tf, e ainda assim com folga apertada.
+# Se o Zabbix ficar lento ou morrer, suba instance_type para t3.small em
+# infra/variables.tf — aí sai do free tier.
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  zabbix_db_data:
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.13.3
+    container_name: prometheus
+    restart: always
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:13.2.1
+    container_name: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/fcgames-observability.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring
+
+  zabbix-db:
+    image: mariadb:10.11
+    container_name: zabbix-db
+    restart: always
+    command: --default-authentication-plugin=mysql_native_password --innodb-buffer-pool-size=128M # Otimização de RAM para o MariaDB
+    environment:
+      MYSQL_DATABASE: "zabbix"
+      MYSQL_USER: "zabbix"
+      MYSQL_PASSWORD: ${ZABBIX_DB_PASSWORD:-zabbix_password}
+      MYSQL_ROOT_PASSWORD: ${ZABBIX_DB_ROOT_PASSWORD:-root_password}
+    volumes:
+      - zabbix_db_data:/var/lib/mysql
+    networks:
+      - monitoring
+
+  zabbix-server:
+    image: zabbix/zabbix-server-mysql:alpine-6.4-latest
+    container_name: zabbix-server
+    restart: always
+    ports:
+      - "10051:10051"
+    environment:
+      DB_SERVER_HOST: "zabbix-db"
+      MYSQL_DATABASE: "zabbix"
+      MYSQL_USER: "zabbix"
+      MYSQL_PASSWORD: ${ZABBIX_DB_PASSWORD:-zabbix_password}
+      MYSQL_ROOT_PASSWORD: ${ZABBIX_DB_ROOT_PASSWORD:-root_password}
+    depends_on:
+      - zabbix-db
+    networks:
+      - monitoring
+
+  zabbix-web:
+    image: zabbix/zabbix-web-nginx-mysql:alpine-6.4-latest
+    container_name: zabbix-web
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      DB_SERVER_HOST: "zabbix-db"
+      MYSQL_DATABASE: "zabbix"
+      MYSQL_USER: "zabbix"
+      MYSQL_PASSWORD: ${ZABBIX_DB_PASSWORD:-zabbix_password}
+      ZBX_SERVER_HOST: "zabbix-server"
+      PHP_TZ: "America/Sao_Paulo"
+    depends_on:
+      - zabbix-db
+      - zabbix-server
+    networks:
+      - monitoring

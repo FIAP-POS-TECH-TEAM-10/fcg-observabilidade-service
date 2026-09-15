@@ -1,25 +1,28 @@
-name: "Plan e Deploy Stack de Monitoramento"
+name: "Plan e Deploy Stack de Monitoramento Grafana"
 
 on:
+  # O apply exige estar em main. Antes o workflow só disparava em develop, então
+  # a condição do job nunca era satisfeita e o deploy jamais rodava.
   push:
     branches:
-      - develop
+      - main
   pull_request:
     branches:
-      - develop
+      - main
+  workflow_dispatch:
 
-# Permissões necessárias para autenticação via OIDC
 permissions:
   id-token: write # Requerido para solicitar o token OIDC
   contents: read  # Requerido para fazer checkout do código
-  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR (opcional)
+
+env:
+  AWS_REGION: sa-east-1
+  ROLE_TO_ASSUME: arn:aws:iam::915153720516:role/GitHubActions-Observabilidade-Deploy-Role
 
 jobs:
   terraform-plan:
     name: "Terraform Plan (Validação)"
     runs-on: ubuntu-latest
-    outputs:
-      ec2_id: ${{ steps.tf-outputs.outputs.ec2_id }}
 
     steps:
       - name: Checkout do Código
@@ -28,38 +31,34 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
 
       - name: Terraform Init
-        run: |
-          cd terraform
-          terraform init
+        working-directory: infra
+        run: terraform init
 
       - name: Terraform Format Check
-        run: |
-          cd terraform
-          terraform fmt -check
+        working-directory: infra
+        run: terraform fmt -check
 
       - name: Terraform Validate
-        run: |
-          cd terraform
-          terraform validate
+        working-directory: infra
+        run: terraform validate
 
       - name: Terraform Plan
-        id: plan
-        run: |
-          cd terraform
-          terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+        working-directory: infra
+        run: terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
 
   terraform-apply-and-deploy:
     name: "Terraform Apply & Deploy Stack"
     needs: terraform-plan
-    # Roda o Apply APENAS quando houver PUSH na branch main (não roda em Pull Requests)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
 
     steps:
@@ -69,34 +68,95 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform Init
-        run: |
-          cd terraform
-          terraform init
+        with:
+          terraform_version: "1.7.0"
 
       - name: Terraform Apply
-        id: apply
+        working-directory: infra
         run: |
-          cd terraform
+          terraform init
           terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
-          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+          echo "EC2_ID=$(terraform output -raw instance_id)" >> "$GITHUB_ENV"
 
-      - name: Aguardar Inicialização do Docker na EC2
-        run: sleep 30
-
-      # Exemplo de comando via AWS SSM Run Command (sem precisar de IP Público)
-      - name: Deploy Docker Compose via AWS SSM
+      # O agente do SSM leva alguns minutos para registrar numa instância nova.
+      # Esperar pelo estado real evita o "sleep 30" que falhava em boot lento.
+      - name: Aguardar a instância aparecer no SSM
         run: |
-          echo "Enviando arquivo docker-compose.yml e executando o deploy via SSM..."
-          
-          # 1. Copiar o docker-compose.yml para a EC2 usando SSM S3 / RunCommand
-          aws ssm send-command \
-            --instance-ids "${{ env.EC2_ID }}" \
+          for i in $(seq 1 40); do
+            PING=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$EC2_ID" \
+              --query 'InstanceInformationList[0].PingStatus' \
+              --output text 2>/dev/null || echo "None")
+            if [ "$PING" = "Online" ]; then
+              echo "Instância $EC2_ID online no SSM."
+              exit 0
+            fi
+            echo "Aguardando o agente do SSM ($i/40)..."
+            sleep 15
+          done
+          echo "A instância não registrou no SSM a tempo." >&2
+          exit 1
+
+      # O compose sozinho não basta: sem prometheus.yml e sem a pasta grafana/ o
+      # Prometheus sobe sem alvos e o Grafana sem datasource nem dashboard.
+      # O conteúdo vai em base64 porque injetar YAML cru com $(cat ...) quebra a
+      # lista de comandos nas quebras de linha.
+      - name: Montar o comando de deploy
+        run: |
+          python3 - <<'PY'
+          import base64, json, subprocess
+
+          pacote = subprocess.run(
+              ["tar", "-czf", "-", "docker-compose.yml", "prometheus.yml", "grafana"],
+              capture_output=True, check=True,
+          ).stdout
+          b64 = base64.b64encode(pacote).decode()
+
+          comandos = [
+              "set -e",
+              "mkdir -p /opt/observability",
+              f"echo '{b64}' | base64 -d | tar -xzf - -C /opt/observability",
+              "cd /opt/observability && docker compose pull && docker compose up -d --remove-orphans",
+          ]
+
+          with open("/tmp/ssm-params.json", "w") as f:
+              json.dump({"commands": comandos}, f)
+          PY
+
+      - name: Publicar a stack via AWS SSM
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "$EC2_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands=["cat << 'EOF' > /home/ubuntu/docker-compose.yml", "$(cat docker-compose.yml)", "EOF", "chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml", "cd /home/ubuntu && docker compose pull && docker compose up -d"]
+            --comment "Deploy da stack de observabilidade" \
+            --parameters file:///tmp/ssm-params.json \
+            --query "Command.CommandId" --output text)
+
+          echo "Comando enviado: $CMD_ID"
+          aws ssm wait command-executed --command-id "$CMD_ID" --instance-id "$EC2_ID" || true
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$CMD_ID" --instance-id "$EC2_ID" \
+            --query Status --output text)
+
+          echo "--- saída ---"
+          aws ssm get-command-invocation \
+            --command-id "$CMD_ID" --instance-id "$EC2_ID" \
+            --query StandardOutputContent --output text
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "--- erro ---" >&2
+            aws ssm get-command-invocation \
+              --command-id "$CMD_ID" --instance-id "$EC2_ID" \
+              --query StandardErrorContent --output text >&2
+            exit 1
+          fi
+
+      - name: Endereço do Grafana
+        working-directory: infra
+        run: terraform output -raw grafana_url

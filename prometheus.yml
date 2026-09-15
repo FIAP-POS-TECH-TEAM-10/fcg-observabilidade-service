@@ -1,19 +1,68 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
 
+# Os alvos antigos (fcg-users-api:5001 etc.) eram nomes de container do compose
+# local — na AWS não resolvem para nada. Aqui a descoberta é feita pela API da
+# EC2: o ASG de cada serviço troca a instância e o IP a qualquer momento, então
+# alvo fixo quebraria no primeiro replace.
+#
+# O filtro casa a tag Name por curinga (*users*, *catalog*) em vez de nome exato,
+# porque os clusters no ar (fcg-users-cluster etc.) não batem com o que está no
+# Terraform commitado das APIs. Confira as tags reais com:
+#
+#   aws ec2 describe-instances --region sa-east-1 \
+#     --filters "Name=instance-state-name,Values=running" \
+#     --query 'Reservations[].Instances[].[InstanceId,PrivateIpAddress,Tags[?Key==`Name`].Value|[0]]' \
+#     --output table
+#
+# Requer ec2:DescribeInstances na role da instância — concedido em infra/main.tf.
 scrape_configs:
-  - job_name: 'fcg-users-api'
-    static_configs:
-      - targets: ['fcg-users-api:5001']
+  - job_name: 'fcg-users-service'
+    ec2_sd_configs:
+      - region: sa-east-1
+        port: 5001
+        filters:
+          - name: 'tag:Name'
+            values: ['*users*']
+          - name: 'instance-state-name'
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
 
-  - job_name: 'fcg-catalog-api'
-    static_configs:
-      - targets: ['fcg-catalog-api:5002']
+  - job_name: 'fcg-catalog-service'
+    ec2_sd_configs:
+      - region: sa-east-1
+        port: 5002
+        filters:
+          - name: 'tag:Name'
+            values: ['*catalog*']
+          - name: 'instance-state-name'
+            values: ['running']
+    relabel_configs:
+      - source_labels: [__meta_ec2_instance_id]
+        target_label: instance_id
 
-  - job_name: 'fcg-payments-api'
-    static_configs:
-      - targets: ['fcg-payments-api:5003']
-
-  - job_name: 'fcg-notifications-worker'
-    static_configs:
-      - targets: ['fcg-notifications-worker:5004']
+  # Payments e notifications também expõem /metrics. Descomente quando a infra
+  # deles estiver publicada seguindo a mesma convenção de tag.
+  #
+  # - job_name: 'fcg-payments-service'
+  #   ec2_sd_configs:
+  #     - region: sa-east-1
+  #       port: 5003
+  #       filters:
+  #         - name: 'tag:Name'
+  #           values: ['*payments*']
+  #         - name: 'instance-state-name'
+  #           values: ['running']
+  #
+  # - job_name: 'fcg-notifications-service'
+  #   ec2_sd_configs:
+  #     - region: sa-east-1
+  #       port: 5004
+  #       filters:
+  #         - name: 'tag:Name'
+  #           values: ['*notifications*']
+  #         - name: 'instance-state-name'
+  #           values: ['running']

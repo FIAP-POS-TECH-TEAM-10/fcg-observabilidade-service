@@ -18,10 +18,9 @@ resource "aws_key_pair" "deployer" {
   public_key = var.public_key
 }
 
-# Security Group com portas das ferramentas liberadas
 resource "aws_security_group" "monitoring_sg" {
   name        = "monitoring-sg"
-  description = "Acesso para Prometheus, Grafana, Zabbix e SSH"
+  description = "Acesso para Grafana, Prometheus, Zabbix e SSH"
 
   ingress {
     description = "SSH"
@@ -36,15 +35,7 @@ resource "aws_security_group" "monitoring_sg" {
     from_port   = 3000
     to_port     = 3000
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "Zabbix Web"
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.grafana_allowed_cidrs
   }
 
   ingress {
@@ -52,15 +43,24 @@ resource "aws_security_group" "monitoring_sg" {
     from_port   = 9090
     to_port     = 9090
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.prometheus_allowed_cidrs
   }
 
+  ingress {
+    description = "Zabbix Web"
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = var.zabbix_allowed_cidrs
+  }
+
+  # Porta que os agentes Zabbix usam para enviar dados ao server.
   ingress {
     description = "Zabbix Server Traps/Agents"
     from_port   = 10051
     to_port     = 10051
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = var.zabbix_allowed_cidrs
   }
 
   egress {
@@ -71,11 +71,54 @@ resource "aws_security_group" "monitoring_sg" {
   }
 }
 
-# Instância EC2 (Recomendado t3.medium no mínimo para rodar toda essa stack)
+# ------------------------------------------------------------------------------
+# IAM: sem esta role o agente do SSM não consegue registrar a instância, e o
+# `aws ssm send-command` do pipeline falha com InvalidInstanceId.
+# ------------------------------------------------------------------------------
+resource "aws_iam_role" "monitoring" {
+  name = "monitoring-server-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action    = "sts:AssumeRole"
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ssm" {
+  role       = aws_iam_role.monitoring.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# O ec2_sd_configs do Prometheus descobre as APIs consultando a API da EC2.
+resource "aws_iam_role_policy" "ec2_discovery" {
+  name = "prometheus-ec2-discovery"
+  role = aws_iam_role.monitoring.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["ec2:DescribeInstances", "ec2:DescribeAvailabilityZones"]
+      Resource = "*"
+    }]
+  })
+}
+
+resource "aws_iam_instance_profile" "monitoring" {
+  name = "monitoring-server-profile"
+  role = aws_iam_role.monitoring.name
+}
+
+# Instância EC2
 resource "aws_instance" "monitoring_server" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t2.micro" # 100% elegível ao Free Tier (750h/mês)
-  key_name      = aws_key_pair.deployer.key_name
+  ami                  = data.aws_ami.ubuntu.id
+  instance_type        = var.instance_type
+  key_name             = aws_key_pair.deployer.key_name
+  iam_instance_profile = aws_iam_instance_profile.monitoring.name
 
   vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
 
@@ -86,7 +129,7 @@ resource "aws_instance" "monitoring_server" {
 
   user_data = <<-EOF
               #!/bin/bash
-              # 1. Configurar SWAP de 2GB para não estourar a memória da t2.micro
+              # 1. SWAP de 2GB: folga para a t2.micro não estourar em picos
               fallocate -l 2G /swapfile
               chmod 600 /swapfile
               mkswap /swapfile
@@ -96,25 +139,22 @@ resource "aws_instance" "monitoring_server" {
               # 2. Instalar Docker e Docker Compose
               apt-get update -y
               apt-get install -y ca-certificates curl gnupg lsb-release
-              
+
               mkdir -p /etc/apt/keyrings
               curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
               echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-              
+
               apt-get update -y
               apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-              
+
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
+
+              mkdir -p /opt/observability
               EOF
 
   tags = {
     Name = "Monitoring-Server-FreeTier"
   }
-}
-
-output "ec2_public_ip" {
-  value       = aws_instance.monitoring_server.public_ip
-  description = "IP Público da instância EC2"
 }

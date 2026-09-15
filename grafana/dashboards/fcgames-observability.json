@@ -163,7 +163,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
+          "expr": "(sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"5..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
           "legendFormat": "Taxa de erro 5xx",
           "range": true,
           "refId": "A"
@@ -204,7 +204,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"5..\"}[$__rate_interval])) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
+          "expr": "(sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"5..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
           "legendFormat": "5xx",
           "range": true,
           "refId": "A"
@@ -212,7 +212,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "editorMode": "code",
-          "expr": "sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"4..\"}[$__rate_interval])) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
+          "expr": "(sum(rate(http_request_duration_seconds_count{job=~\"$service\", code=~\"4..\"}[$__rate_interval])) or vector(0)) / clamp_min(sum(rate(http_request_duration_seconds_count{job=~\"$service\"}[$__rate_interval])), 1)",
           "legendFormat": "4xx",
           "range": true,
           "refId": "B"
