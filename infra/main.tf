@@ -101,6 +101,7 @@ resource "aws_instance" "monitoring_server" {
   instance_type = "t3.micro" # 100% elegível ao Free Tier (750h/mês)
   iam_instance_profile = aws_iam_instance_profile.ssm_profile.name
 
+  associate_public_ip_address = true
   vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
 
   root_block_device {
