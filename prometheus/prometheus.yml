@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # API Gateway só fala HTTPS -- sem "scheme: https" o Prometheus tenta HTTP
+  # puro no host e a scrape falha (target fica "down").
+  - job_name: 'fcg-users-service'
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['1ipnp7vn16.execute-api.sa-east-1.amazonaws.com']
+
+  - job_name: 'fcg-catalog-service'
+    scheme: https
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['e0wcpyuyna.execute-api.sa-east-1.amazonaws.com']
+
+  # fcg-payments-service ainda não expõe /metrics (Program.cs não registra
+  # UseHttpMetrics/MapMetrics) -- adicionar aqui quando isso for feito.
