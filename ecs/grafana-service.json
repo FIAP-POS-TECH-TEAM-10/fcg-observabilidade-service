@@ -1,4 +1,4 @@
-{
+﻿{
   "serviceName": "fcg-grafana",
   "cluster": "fcgames-cluster",
   "taskDefinition": "fcg-grafana",
@@ -7,8 +7,8 @@
   "platformVersion": "LATEST",
   "networkConfiguration": {
     "awsvpcConfiguration": {
-      "subnets": ["<PRIVATE_SUBNET_ID_1>", "<PRIVATE_SUBNET_ID_2>"],
-      "securityGroups": ["<SG_OBSERVABILITY_ID>"],
+      "subnets": ["subnet-062d19e93a7b87057", "subnet-09844fff782680ead", "subnet-022929303bae19eb0"],
+      "securityGroups": ["sg-06478317443778406"],
       "assignPublicIp": "DISABLED"
     }
   },
@@ -29,3 +29,4 @@
     ]
   }
 }
+

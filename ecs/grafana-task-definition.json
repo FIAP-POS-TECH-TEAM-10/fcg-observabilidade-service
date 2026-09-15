@@ -1,14 +1,14 @@
-{
+﻿{
   "family": "fcg-grafana",
   "networkMode": "awsvpc",
   "requiresCompatibilities": ["FARGATE"],
   "cpu": "256",
   "memory": "512",
-  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/ecsTaskExecutionRole",
+  "executionRoleArn": "arn:aws:iam::915153720516:role/ecsTaskExecutionRole",
   "containerDefinitions": [
     {
       "name": "grafana",
-      "image": "<ACCOUNT_ID>.dkr.ecr.<AWS_REGION>.amazonaws.com/fcg-grafana:1.0.0",
+      "image": "915153720516.dkr.ecr.sa-east-1.amazonaws.com/fcg-grafana:1.0.0",
       "essential": true,
       "portMappings": [
         {
@@ -25,6 +25,10 @@
           "value": "admin"
         },
         {
+          "name": "GF_SECURITY_ADMIN_PASSWORD",
+          "value": "admin"
+        },
+        {
           "name": "GF_AUTH_ANONYMOUS_ENABLED",
           "value": "false"
         },
@@ -35,12 +39,6 @@
         {
           "name": "GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH",
           "value": "/var/lib/grafana/dashboards/fcgames-observability.json"
-        }
-      ],
-      "secrets": [
-        {
-          "name": "GF_SECURITY_ADMIN_PASSWORD",
-          "valueFrom": "arn:aws:secretsmanager:<AWS_REGION>:<ACCOUNT_ID>:secret:<GRAFANA_SECRET_NAME>"
         }
       ],
       "healthCheck": {
@@ -57,7 +55,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/fcg-grafana",
-          "awslogs-region": "<AWS_REGION>",
+          "awslogs-region": "sa-east-1",
           "awslogs-stream-prefix": "ecs",
           "awslogs-create-group": "true"
         }
@@ -65,3 +63,4 @@
     }
   ]
 }
+

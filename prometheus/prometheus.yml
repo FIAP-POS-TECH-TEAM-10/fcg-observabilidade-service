@@ -6,9 +6,9 @@ scrape_configs:
   - job_name: 'fcg-users-service'
     metrics_path: /metrics
     static_configs:
-      - targets: ['fcg-users-service:5001']
+      - targets: ['e0wcpyuyna.execute-api.sa-east-1.amazonaws.com']
 
   - job_name: 'fcg-catalog-service'
     metrics_path: /metrics
     static_configs:
-      - targets: ['fcg-catalog-service:5002']
+      - targets: ['1ipnp7vn16.execute-api.sa-east-1.amazonaws.com']
