@@ -127,7 +127,7 @@ jobs:
 
       - name: Deploy Docker Compose via AWS SSM
         run: |
-          echo "Enviando docker-compose.yml e executando deploy via SSM na instância $EC2_ID..."
+          echo "Empacotando stack (docker-compose.yml + grafana/ + prometheus/) e enviando via SSM na instância $EC2_ID..."
 
           # O SSM Agent (pré-instalado via snap na AMI) registra "Online" logo nos
           # primeiros segundos do boot -- MUITO antes do user_data terminar de
@@ -135,7 +135,12 @@ jobs:
           # "Online no SSM" != "user_data terminou". Sem o cloud-init status --wait
           # abaixo, esse comando roda cedo demais e falha com "docker: not found".
 
-          COMPOSE_B64=$(base64 -w 0 "${{ github.workspace }}/docker-compose.yml")
+          # Prometheus e Grafana agora são construídos localmente (Dockerfile próprio,
+          # com o prometheus.yml e os dashboards do Grafana já embutidos na imagem) em
+          # vez de puxar as imagens públicas genéricas -- por isso precisa mandar as
+          # pastas grafana/ e prometheus/ pra EC2 também, não só o docker-compose.yml.
+          tar -czf "${{ runner.temp }}/stack.tar.gz" docker-compose.yml grafana prometheus
+          STACK_B64=$(base64 -w 0 "${{ runner.temp }}/stack.tar.gz")
 
           aws ssm send-command \
             --instance-ids "$EC2_ID" \
@@ -143,7 +148,8 @@ jobs:
             --comment "Deploy Docker Compose Stack" \
             --parameters commands="[
               \"cloud-init status --wait > /dev/null 2>&1 || true\",
-              \"echo '$COMPOSE_B64' | base64 -d > /home/ubuntu/docker-compose.yml\",
-              \"chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml\",
-              \"cd /home/ubuntu && docker compose pull && docker compose up -d\"
+              \"echo '$STACK_B64' | base64 -d > /home/ubuntu/stack.tar.gz\",
+              \"tar -xzf /home/ubuntu/stack.tar.gz -C /home/ubuntu\",
+              \"chown -R ubuntu:ubuntu /home/ubuntu/docker-compose.yml /home/ubuntu/grafana /home/ubuntu/prometheus\",
+              \"cd /home/ubuntu && docker compose build && docker compose up -d\"
             ]"
