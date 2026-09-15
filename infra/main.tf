@@ -12,12 +12,6 @@ data "aws_ami" "ubuntu" {
   owners = ["099720109477"] # Canonical
 }
 
-# Key Pair para acesso SSH via chave pública
-resource "aws_key_pair" "deployer" {
-  key_name   = "monitoring-key"
-  public_key = var.public_key
-}
-
 # Security Group com portas das ferramentas liberadas
 resource "aws_security_group" "monitoring_sg" {
   name        = "monitoring-sg"
@@ -75,7 +69,7 @@ resource "aws_security_group" "monitoring_sg" {
 resource "aws_instance" "monitoring_server" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = "t2.micro" # 100% elegível ao Free Tier (750h/mês)
-  key_name      = aws_key_pair.deployer.key_name
+  
 
   vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
 
