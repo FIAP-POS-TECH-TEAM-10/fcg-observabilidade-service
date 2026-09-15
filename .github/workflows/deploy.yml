@@ -96,14 +96,18 @@ jobs:
           echo "EC2_ID=$EC2_ID" >> $GITHUB_ENV
         working-directory: ./infra
 
-      - name: Aguardar Inicialização do Docker na EC2
-        run: sleep 30
+      - name: Aguardar SSM Agent ficar ativo na EC2
+        run: |
+          echo "Aguardando a instância $EC2_ID ficar pronta e online no AWS SSM..."
+          
+          # Aguarda até 3 minutos para a EC2 aparecer no SSM
+          aws ssm wait instance-information-fulfilled \
+            --filters "Key=InstanceIds,Values=$EC2_ID"
 
       - name: Deploy Docker Compose via AWS SSM
         run: |
           echo "Enviando docker-compose.yml e executando deploy via SSM na instância $EC2_ID..."
 
-          # Usa o caminho absoluto da raiz do repositório
           COMPOSE_B64=$(base64 -w 0 "${{ github.workspace }}/docker-compose.yml")
 
           aws ssm send-command \
