@@ -98,11 +98,32 @@ jobs:
 
       - name: Aguardar SSM Agent ficar ativo na EC2
         run: |
-          echo "Aguardando a instância $EC2_ID ficar pronta e online no AWS SSM..."
-          
-          # Aguarda até 3 minutos para a EC2 aparecer no SSM
-          aws ssm wait instance-information-fulfilled \
-            --filters "Key=InstanceIds,Values=$EC2_ID"
+          echo "Aguardando a instância $EC2_ID ficar com status 'Online' no AWS SSM..."
+
+          # Tenta por até 3 minutos (18 tentativas de 10s)
+          TIMEOUT=18
+          COUNT=0
+
+          until [ $COUNT -ge $TIMEOUT ]; do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$EC2_ID" \
+              --query "InstanceInformationList[0].PingStatus" \
+              --output text 2>/dev/null || echo "NotReady")
+
+            if [ "$STATUS" == "Online" ]; then
+              echo "Instância $EC2_ID está ONLINE e pronta para receber comandos via SSM!"
+              break
+            fi
+
+            echo "Aguardando inicialização do SSM Agent na EC2 (Status atual: $STATUS)... ($((COUNT+1))/$TIMEOUT)"
+            sleep 10
+            COUNT=$((COUNT+1))
+          done
+
+          if [ "$STATUS" != "Online" ]; then
+            echo "Erro: A instância $EC2_ID não ficou online no SSM a tempo."
+            exit 1
+          fi
 
       - name: Deploy Docker Compose via AWS SSM
         run: |
