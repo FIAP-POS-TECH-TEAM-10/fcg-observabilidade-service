@@ -92,7 +92,8 @@ jobs:
         id: apply
         run: |
           terraform apply -auto-approve
-          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+          EC2_ID=$(terraform output -raw instance_id)
+          echo "EC2_ID=$EC2_ID" >> $GITHUB_ENV
         working-directory: ./infra
 
       - name: Aguardar Inicialização do Docker na EC2
@@ -100,9 +101,18 @@ jobs:
 
       - name: Deploy Docker Compose via AWS SSM
         run: |
-          echo "Enviando arquivo docker-compose.yml e executando o deploy via SSM..."
-          
+          echo "Enviando docker-compose.yml e executando deploy via SSM na instância $EC2_ID..."
+
+          # 1. Converte o docker-compose.yml para Base64 (evita erros de escape no SSM)
+          COMPOSE_B64=$(base64 -w 0 docker-compose.yml)
+
+          # 2. Executa o script na EC2: decodifica o arquivo e sobe os containers
           aws ssm send-command \
-            --instance-ids "${{ env.EC2_ID }}" \
+            --instance-ids "$EC2_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands=["cat << 'EOF' > /home/ubuntu/docker-compose.yml", "$(cat docker-compose.yml)", "EOF", "chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml", "cd /home/ubuntu && docker compose pull && docker compose up -d"]
+            --comment "Deploy Docker Compose Stack" \
+            --parameters commands="[
+              \"echo '$COMPOSE_B64' | base64 -d > /home/ubuntu/docker-compose.yml\",
+              \"chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml\",
+              \"cd /home/ubuntu && docker compose pull && docker compose up -d\"
+            ]"
