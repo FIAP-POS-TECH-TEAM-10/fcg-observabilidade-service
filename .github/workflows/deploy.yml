@@ -29,6 +29,14 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
+      - name: Debug OIDC ID Token Claims
+        run: |          
+          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
+          
+          echo "=== OIDC CLAIMS ==="          
+          echo "$TOKEN" | jq -R 'split(".") | .[1] | @base64d | fromjson'        
+
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -40,24 +48,24 @@ jobs:
 
       - name: Terraform Init
         run: |
-          cd terraform
-          terraform init
+          cd infra
+          infra init
 
       - name: Terraform Format Check
         run: |
-          cd terraform
-          terraform fmt -check
+          cd infra
+          infra fmt -check
 
       - name: Terraform Validate
         run: |
-          cd terraform
-          terraform validate
+          cd infra
+          infra validate
 
       - name: Terraform Plan
         id: plan
         run: |
-          cd terraform
-          terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          cd infra
+          infra plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
 
   terraform-apply-and-deploy:
     name: "Terraform Apply & Deploy Stack"
@@ -81,15 +89,15 @@ jobs:
 
       - name: Terraform Init
         run: |
-          cd terraform
-          terraform init
+          cd infra
+          infra init
 
       - name: Terraform Apply
         id: apply
         run: |
-          cd terraform
-          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
-          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+          cd infra
+          infra apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          echo "EC2_ID=$(infra output -raw instance_id)" >> $GITHUB_ENV
 
       - name: Aguardar Inicialização do Docker na EC2
         run: sleep 30
