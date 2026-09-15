@@ -57,7 +57,7 @@ jobs:
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+        run: terraform plan -no-color
         working-directory: ./infra
 
   terraform-apply-and-deploy:
@@ -91,7 +91,7 @@ jobs:
       - name: Terraform Apply
         id: apply
         run: |
-          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          terraform apply -auto-approve
           echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
         working-directory: ./infra
 
