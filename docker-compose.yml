@@ -61,7 +61,9 @@ services:
       - monitoring
 
   prometheus:
-    image: prom/prometheus:latest
+    build:
+      context: ./prometheus
+    image: fcg-prometheus:1.0.0
     container_name: prometheus
     restart: always
     command:
@@ -75,11 +77,20 @@ services:
       - monitoring
 
   grafana:
-    image: grafana/grafana:latest
+    build:
+      context: ./grafana
+    image: fcg-grafana:1.0.0
     container_name: grafana
     restart: always
     ports:
       - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards-data/fcgames-observability.json
     volumes:
       - grafana_data:/var/lib/grafana
     depends_on:

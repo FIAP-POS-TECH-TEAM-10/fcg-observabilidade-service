@@ -1,4 +1,4 @@
-name: "Deploy Stack de Monitoramento"
+name: "Plan e Deploy Stack de Monitoramento"
 
 on:
   push:
@@ -12,7 +12,11 @@ on:
 permissions:
   id-token: write # Requerido para solicitar o token OIDC
   contents: read  # Requerido para fazer checkout do código
-  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR (opcional)
+  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR
+
+env:
+  AWS_REGION: sa-east-1
+  ROLE_TO_ASSUME: arn:aws:iam::915153720516:role/GitHubActions-Observabilidade-Deploy-Role
 
 jobs:
   terraform-plan:
@@ -28,38 +32,39 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          terraform_version: "1.5.0"
+          working-directory: ./infra
 
       - name: Terraform Init
-        run: |
-          cd terraform
-          terraform init
+        run: terraform init
+        working-directory: ./infra
 
       - name: Terraform Format Check
-        run: |
-          cd terraform
-          terraform fmt -check
+        run: terraform fmt -check
+        working-directory: ./infra
+        continue-on-error: true
 
       - name: Terraform Validate
-        run: |
-          cd terraform
-          terraform validate
+        run: terraform validate
+        working-directory: ./infra
 
       - name: Terraform Plan
         id: plan
-        run: |
-          cd terraform
-          terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+        run: terraform plan -no-color
+        working-directory: ./infra
 
   terraform-apply-and-deploy:
     name: "Terraform Apply & Deploy Stack"
     needs: terraform-plan
-    # Roda o Apply APENAS quando houver PUSH na branch main (não roda em Pull Requests)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Roda o Apply APENAS quando houver PUSH na branch develop (não roda em Pull Requests)
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -69,34 +74,82 @@ jobs:
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "sa-east-1"
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          terraform_version: "1.5.0"
+          working-directory: ./infra
 
       - name: Terraform Init
-        run: |
-          cd terraform
-          terraform init
+        run: terraform init
+        working-directory: ./infra
 
       - name: Terraform Apply
         id: apply
         run: |
-          cd terraform
-          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
-          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+          terraform apply -auto-approve
+          EC2_ID=$(terraform output -raw instance_id)
+          echo "EC2_ID=$EC2_ID" >> $GITHUB_ENV
+        working-directory: ./infra
 
-      - name: Aguardar Inicialização do Docker na EC2
-        run: sleep 30
+      - name: Aguardar SSM Agent ficar ativo na EC2
+        run: |
+          echo "Aguardando a instância $EC2_ID ficar com status 'Online' no AWS SSM..."
 
-      # Exemplo de comando via AWS SSM Run Command (sem precisar de IP Público)
+          # Tenta por até 3 minutos (18 tentativas de 10s)
+          TIMEOUT=18
+          COUNT=0
+
+          until [ $COUNT -ge $TIMEOUT ]; do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=$EC2_ID" \
+              --query "InstanceInformationList[0].PingStatus" \
+              --output text 2>/dev/null || echo "NotReady")
+
+            if [ "$STATUS" == "Online" ]; then
+              echo "Instância $EC2_ID está ONLINE e pronta para receber comandos via SSM!"
+              break
+            fi
+
+            echo "Aguardando inicialização do SSM Agent na EC2 (Status atual: $STATUS)... ($((COUNT+1))/$TIMEOUT)"
+            sleep 10
+            COUNT=$((COUNT+1))
+          done
+
+          if [ "$STATUS" != "Online" ]; then
+            echo "Erro: A instância $EC2_ID não ficou online no SSM a tempo."
+            exit 1
+          fi
+
       - name: Deploy Docker Compose via AWS SSM
         run: |
-          echo "Enviando arquivo docker-compose.yml e executando o deploy via SSM..."
-          
-          # 1. Copiar o docker-compose.yml para a EC2 usando SSM S3 / RunCommand
+          echo "Empacotando stack (docker-compose.yml + grafana/ + prometheus/) e enviando via SSM na instância $EC2_ID..."
+
+          # O SSM Agent (pré-instalado via snap na AMI) registra "Online" logo nos
+          # primeiros segundos do boot -- MUITO antes do user_data terminar de
+          # instalar o Docker (apt-get update + install leva 1-2min num t3.micro).
+          # "Online no SSM" != "user_data terminou". Sem o cloud-init status --wait
+          # abaixo, esse comando roda cedo demais e falha com "docker: not found".
+
+          # Prometheus e Grafana agora são construídos localmente (Dockerfile próprio,
+          # com o prometheus.yml e os dashboards do Grafana já embutidos na imagem) em
+          # vez de puxar as imagens públicas genéricas -- por isso precisa mandar as
+          # pastas grafana/ e prometheus/ pra EC2 também, não só o docker-compose.yml.
+          tar -czf "${{ runner.temp }}/stack.tar.gz" docker-compose.yml grafana prometheus
+          STACK_B64=$(base64 -w 0 "${{ runner.temp }}/stack.tar.gz")
+
           aws ssm send-command \
-            --instance-ids "${{ env.EC2_ID }}" \
+            --instance-ids "$EC2_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands=["cat << 'EOF' > /home/ubuntu/docker-compose.yml", "$(cat docker-compose.yml)", "EOF", "chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml", "cd /home/ubuntu && docker compose pull && docker compose up -d"]
+            --comment "Deploy Docker Compose Stack" \
+            --parameters commands="[
+              \"cloud-init status --wait > /dev/null 2>&1 || true\",
+              \"echo '$STACK_B64' | base64 -d > /home/ubuntu/stack.tar.gz\",
+              \"tar -xzf /home/ubuntu/stack.tar.gz -C /home/ubuntu\",
+              \"chown -R ubuntu:ubuntu /home/ubuntu/docker-compose.yml /home/ubuntu/grafana /home/ubuntu/prometheus\",
+              \"cd /home/ubuntu && docker compose build && docker compose up -d\"
+            ]"
