@@ -111,24 +111,35 @@ resource "aws_instance" "monitoring_server" {
 
   user_data = <<-EOF
               #!/bin/bash
-              # 1. Configurar SWAP de 2GB para não estourar a memória da t2.micro
+              exec > /var/log/user-data.log 2>&1
+              set -x
+
+              # 1. Configurar SWAP de 2GB
               fallocate -l 2G /swapfile
               chmod 600 /swapfile
               mkswap /swapfile
               swapon /swapfile
               echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-              # 2. Instalar Docker e Docker Compose
+              # 2. Instalar e iniciar o SSM Agent via pacote oficial AWS
+              mkdir -p /tmp/ssm
+              cd /tmp/ssm
+              curl https://s3.sa-east-1.amazonaws.com/amazon-ssm-sa-east-1/latest/debian_amd64/amazon-ssm-agent.deb -o amazon-ssm-agent.deb
+              dpkg -i amazon-ssm-agent.deb
+              systemctl enable amazon-ssm-agent
+              systemctl restart amazon-ssm-agent
+
+              # 3. Instalar Docker e Docker Compose
               apt-get update -y
               apt-get install -y ca-certificates curl gnupg lsb-release
-              
+
               mkdir -p /etc/apt/keyrings
               curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
               echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-              
+
               apt-get update -y
               apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
-              
+
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
