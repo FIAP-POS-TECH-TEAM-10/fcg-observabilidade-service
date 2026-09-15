@@ -129,6 +129,12 @@ jobs:
         run: |
           echo "Enviando docker-compose.yml e executando deploy via SSM na instância $EC2_ID..."
 
+          # O SSM Agent (pré-instalado via snap na AMI) registra "Online" logo nos
+          # primeiros segundos do boot -- MUITO antes do user_data terminar de
+          # instalar o Docker (apt-get update + install leva 1-2min num t3.micro).
+          # "Online no SSM" != "user_data terminou". Sem o cloud-init status --wait
+          # abaixo, esse comando roda cedo demais e falha com "docker: not found".
+
           COMPOSE_B64=$(base64 -w 0 "${{ github.workspace }}/docker-compose.yml")
 
           aws ssm send-command \
@@ -136,6 +142,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --comment "Deploy Docker Compose Stack" \
             --parameters commands="[
+              \"cloud-init status --wait > /dev/null 2>&1 || true\",
               \"echo '$COMPOSE_B64' | base64 -d > /home/ubuntu/docker-compose.yml\",
               \"chown ubuntu:ubuntu /home/ubuntu/docker-compose.yml\",
               \"cd /home/ubuntu && docker compose pull && docker compose up -d\"
