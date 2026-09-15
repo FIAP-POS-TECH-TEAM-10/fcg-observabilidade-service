@@ -1,3 +1,33 @@
+# 1. Cria a IAM Role
+resource "aws_iam_role" "ssm_role" {
+  name = "ec2-ssm-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# 2. Anexa a política gerenciada do SSM à Role
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# 3. Cria o Instance Profile que vincula a Role à EC2
+resource "aws_iam_instance_profile" "ssm_profile" {
+  name = "ec2-ssm-instance-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
 # Busca a AMI Ubuntu 22.04 LTS mais recente
 data "aws_ami" "ubuntu" {
   most_recent = true
@@ -69,7 +99,7 @@ resource "aws_security_group" "monitoring_sg" {
 resource "aws_instance" "monitoring_server" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = "t3.micro" # 100% elegível ao Free Tier (750h/mês)
-  
+  iam_instance_profile = aws_iam_instance_profile.ssm_profile.name
 
   vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
 
