@@ -1,4 +1,4 @@
-name: "Plan e Deploy Stack de Monitoramento Grafana"
+name: "Plan e Deploy Stack de Monitoramento"
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 permissions:
   id-token: write # Requerido para solicitar o token OIDC
   contents: read  # Requerido para fazer checkout do código
-  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR (opcional)
+  pull-requests: write # Permite adicionar o resultado do plan como comentário no PR
 
 env:
   AWS_REGION: sa-east-1
@@ -29,14 +29,6 @@ jobs:
       - name: Checkout do Código
         uses: actions/checkout@v4
 
-      - name: Debug OIDC ID Token Claims
-        run: |          
-          TOKEN=$(curl -s -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r '.value')
-          
-          echo "=== OIDC CLAIMS ==="          
-          echo "$TOKEN" | jq -R 'split(".") | .[1] | @base64d | fromjson'        
-
       - name: Configurar Credenciais AWS via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -45,33 +37,33 @@ jobs:
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          terraform_version: "1.5.0"
+          working-directory: ./infra
 
       - name: Terraform Init
-        run: |
-          cd infra
-          infra init
+        run: terraform init
+        working-directory: ./infra
 
       - name: Terraform Format Check
-        run: |
-          cd infra
-          infra fmt -check
+        run: terraform fmt -check
+        working-directory: ./infra
 
       - name: Terraform Validate
-        run: |
-          cd infra
-          infra validate
+        run: terraform validate
+        working-directory: ./infra
 
       - name: Terraform Plan
         id: plan
-        run: |
-          cd infra
-          infra plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+        run: terraform plan -no-color -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+        working-directory: ./infra
 
   terraform-apply-and-deploy:
     name: "Terraform Apply & Deploy Stack"
     needs: terraform-plan
-    # Roda o Apply APENAS quando houver PUSH na branch main (não roda em Pull Requests)
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Roda o Apply APENAS quando houver PUSH na branch develop (não roda em Pull Requests)
+    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -86,28 +78,29 @@ jobs:
 
       - name: Configurar Terraform
         uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+          terraform_version: "1.5.0"
+          working-directory: ./infra
 
       - name: Terraform Init
-        run: |
-          cd infra
-          infra init
+        run: terraform init
+        working-directory: ./infra
 
       - name: Terraform Apply
         id: apply
         run: |
-          cd infra
-          infra apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
-          echo "EC2_ID=$(infra output -raw instance_id)" >> $GITHUB_ENV
+          terraform apply -auto-approve -var="public_key=${{ secrets.SSH_PUBLIC_KEY }}"
+          echo "EC2_ID=$(terraform output -raw instance_id)" >> $GITHUB_ENV
+        working-directory: ./infra
 
       - name: Aguardar Inicialização do Docker na EC2
         run: sleep 30
 
-      # Exemplo de comando via AWS SSM Run Command (sem precisar de IP Público)
       - name: Deploy Docker Compose via AWS SSM
         run: |
           echo "Enviando arquivo docker-compose.yml e executando o deploy via SSM..."
           
-          # 1. Copiar o docker-compose.yml para a EC2 usando SSM S3 / RunCommand
           aws ssm send-command \
             --instance-ids "${{ env.EC2_ID }}" \
             --document-name "AWS-RunShellScript" \
