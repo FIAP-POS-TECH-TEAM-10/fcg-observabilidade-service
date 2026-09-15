@@ -67,17 +67,18 @@ resource "aws_security_group" "monitoring_sg" {
 
 # Instância EC2 (Recomendado t3.medium no mínimo para rodar toda essa stack)
 resource "aws_instance" "monitoring_server" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t2.micro" # 100% elegível ao Free Tier (750h/mês)
-  
+  ami                  = data.aws_ami.ubuntu.id
+  instance_type        = "t3.micro" # <--- Alterar de t2.micro para t3.micro
+  iam_instance_profile = aws_iam_instance_profile.ssm_profile.name
 
-  vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
+  associate_public_ip_address = false
+  vpc_security_group_ids      = [aws_security_group.monitoring_sg_private.id]
 
   root_block_device {
-    volume_size = 30 # Limite gratuito de disco SSD (gp3)
+    volume_size = 30
     volume_type = "gp3"
   }
-
+  
   user_data = <<-EOF
               #!/bin/bash
               # 1. Configurar SWAP de 2GB para não estourar a memória da t2.micro
