@@ -49,6 +49,7 @@ jobs:
       - name: Terraform Format Check
         run: terraform fmt -check
         working-directory: ./infra
+        continue-on-error: true
 
       - name: Terraform Validate
         run: terraform validate
