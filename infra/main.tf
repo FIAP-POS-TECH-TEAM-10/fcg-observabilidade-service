@@ -97,12 +97,12 @@ resource "aws_security_group" "monitoring_sg" {
 
 # Instância EC2 (Recomendado t3.medium no mínimo para rodar toda essa stack)
 resource "aws_instance" "monitoring_server" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t3.micro" # 100% elegível ao Free Tier (750h/mês)
+  ami                  = data.aws_ami.ubuntu.id
+  instance_type        = "t3.micro" # 100% elegível ao Free Tier (750h/mês)
   iam_instance_profile = aws_iam_instance_profile.ssm_profile.name
 
   associate_public_ip_address = true
-  vpc_security_group_ids = [aws_security_group.monitoring_sg.id]
+  vpc_security_group_ids      = [aws_security_group.monitoring_sg.id]
 
   root_block_device {
     volume_size = 30 # Limite gratuito de disco SSD (gp3)
@@ -121,15 +121,7 @@ resource "aws_instance" "monitoring_server" {
               swapon /swapfile
               echo '/swapfile none swap sw 0 0' >> /etc/fstab
 
-              # 2. Instalar e iniciar o SSM Agent via pacote oficial AWS
-              mkdir -p /tmp/ssm
-              cd /tmp/ssm
-              curl https://s3.sa-east-1.amazonaws.com/amazon-ssm-sa-east-1/latest/debian_amd64/amazon-ssm-agent.deb -o amazon-ssm-agent.deb
-              dpkg -i amazon-ssm-agent.deb
-              systemctl enable amazon-ssm-agent
-              systemctl restart amazon-ssm-agent
-
-              # 3. Instalar Docker e Docker Compose
+              # 2. Instalar Docker e Docker Compose
               apt-get update -y
               apt-get install -y ca-certificates curl gnupg lsb-release
 
@@ -143,6 +135,17 @@ resource "aws_instance" "monitoring_server" {
               systemctl start docker
               systemctl enable docker
               usermod -aG docker ubuntu
+
+              # 3. Reinicia o SSM Agent (já vem pré-instalado via snap na AMI oficial
+              # da Canonical — não precisa reinstalar via .deb). Ele tenta pegar as
+              # credenciais da IAM Role pelo IMDS logo nos primeiros segundos do boot,
+              # ANTES do user_data rodar, e quando falha nessa primeira tentativa não
+              # tenta de novo sozinho (a conta não tem "Default Host Management"
+              # configurado como fallback) — por isso a instância nunca fica "Online"
+              # no SSM. Reiniciar aqui, no fim do user_data (depois do apt/Docker já
+              # terem dado tempo de sobra pro IMDS estabilizar), força uma nova
+              # tentativa de credenciais que já funciona.
+              snap restart amazon-ssm-agent || systemctl restart amazon-ssm-agent
               EOF
 
   tags = {
