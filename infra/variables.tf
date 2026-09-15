@@ -3,5 +3,7 @@ variable "aws_region" {
 }
 
 variable "instance_type" {
-  default = "t3.medium"
+  type        = string
+  default     = "t3.micro" # <--- Alterar para t3.micro
+  description = "Instância EC2 para a stack de monitoramento"
 }
