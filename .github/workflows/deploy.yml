@@ -103,10 +103,9 @@ jobs:
         run: |
           echo "Enviando docker-compose.yml e executando deploy via SSM na instância $EC2_ID..."
 
-          # 1. Converte o docker-compose.yml para Base64 (evita erros de escape no SSM)
-          COMPOSE_B64=$(base64 -w 0 docker-compose.yml)
+          # Usa o caminho absoluto da raiz do repositório
+          COMPOSE_B64=$(base64 -w 0 "${{ github.workspace }}/docker-compose.yml")
 
-          # 2. Executa o script na EC2: decodifica o arquivo e sobe os containers
           aws ssm send-command \
             --instance-ids "$EC2_ID" \
             --document-name "AWS-RunShellScript" \
